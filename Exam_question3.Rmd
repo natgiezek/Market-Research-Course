@@ -1,0 +1,554 @@
+---
+title: "Exam_question3"
+author: "Natalia Giezek"
+date: '2022-07-23'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+### Clear memory
+rm(list = ls())
+
+library(tidyverse)
+### Load Apollo library
+library(apollo)
+
+### Initialise code
+apollo_initialise()
+
+### Set core controls
+apollo_control = list(
+  modelName       = "MNL_Exam_question3",
+  modelDescr      = "Simple MNL model",
+  indivID         = "id", #name of id column in our data
+  outputDirectory = "output"
+)
+
+# ################################################################# #
+#### LOAD DATA AND APPLY ANY TRANSFORMATIONS                     ####
+# ################################################################# #
+
+# Make sure that working directory is set to script file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Locate auto.RData in the same folder as this script file
+load("shoedata2022.rdata")
+database = shoedata
+```
+a)
+```{r}
+table_of_choices <-database %>%
+  group_by(choice) %>% 
+  summarise(n = n())
+table_of_choices
+
+table_of_means <- database %>%
+  group_by(choice) %>%
+summarise(av_p0 = 0, av_p1 = mean(p1), av_p2 = mean(p2), av_p3 = mean(p3), av_p4 = mean(p4), av_p5 = mean(p5))
+table_of_means
+```
+The table "table_of_means" shows the average prices of both chosen and not chosen alternatives, all of which are important; as the consumers not always choose the cheapest alternatives, maybe there are factors other than price which are important to them.
+
+b) A standard multinomial logit model
+```{r}
+# ################################################################# #
+#### DEFINE MODEL PARAMETERS                                     ####
+# ################################################################# #
+
+### Vector of parameters, assuming there are no alternative-specific constants in this particular model, as a given utility function does not include them
+apollo_beta=c(
+ b_1 = 0,
+ b_2 = 0,
+ b_price =0
+)
+
+### Vector with names (in quotes) of parameters to be kept fixed at their starting value in apollo_beta
+apollo_fixed = c()
+
+# ################################################################# #
+#### GROUP AND VALIDATE INPUTS                                   ####
+# ################################################################# #
+
+apollo_inputs = apollo_validateInputs()
+
+# ################################################################# #
+#### DEFINE MODEL AND LIKELIHOOD FUNCTION                        ####
+# ################################################################# #
+
+apollo_probabilities <-
+  function(apollo_beta,
+           apollo_inputs,
+           functionality = "estimate") {
+    ### Attach inputs and detach after function exit
+    apollo_attach(apollo_beta, apollo_inputs)
+    on.exit(apollo_detach(apollo_beta, apollo_inputs))
+    
+    ### Create list of probabilities P
+    P = list()
+    
+    ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
+    V = list()
+    V[["oo"]] =  b_1 * X10 + b_2*X20 - b_price*p0
+    V[["opt1"]] =  b_1 * X11 + b_2*X21 - b_price*p1
+    V[["opt2"]] =  b_1 * X12 + b_2*X22 - b_price*p2
+    V[["opt3"]] =  b_1 * X13 + b_2*X23 - b_price*p3
+    V[["opt4"]] =  b_1 * X14 + b_2*X24 - b_price*p4
+    V[["opt5"]] =  b_1 * X15 + b_2*X25 - b_price*p5
+    
+    ### Define settings for MNL model component
+    mnl_settings = list(
+      alternatives  = c("oo"=0,"opt1" = 1, "opt2" = 2, "opt3" = 3,"opt4" = 4, "opt5" = 5), 
+      avail         = list(oo = 1,opt1 = 1, opt2 = 1, opt3 = 1,opt4 = 1, opt5 = 1),
+      choiceVar     = choice,
+      utilities     = V
+    )
+    
+    ### Compute probabilities using MNL model
+    P[["model"]] = apollo_mnl(mnl_settings, functionality)
+    
+    ### Prepare and return outputs of function
+    P = apollo_prepareProb(P, apollo_inputs, functionality)
+    return(P)
+  }
+
+# ################################################################# #
+#### MODEL ESTIMATION                                            ####
+# ################################################################# #
+
+model = apollo_estimate(apollo_beta, apollo_fixed, apollo_probabilities, apollo_inputs)
+
+# ################################################################# #
+#### MODEL OUTPUTS                                               ####
+# ################################################################# #
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO SCREEN)                               ----
+# ----------------------------------------------------------------- #
+
+apollo_modelOutput(model, modelOutput_settings = list(printClassical = FALSE))
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO FILE, using model name)               ----
+# ----------------------------------------------------------------- #
+
+apollo_saveOutput(model, saveOutput_settings = list(printClassical = FALSE))
+```
+As |t| >2, so the estimates are significant. All have positive signs, as expected, as the price entered utility specification with a minus sign, so the positive coefficient is expected, the higher the price the lower the utility.
+Therefore, improvements in sole quality, upper durability, and reduction in price have a positive effects on utility.
+Willingness to pay:
+$$ b_1X_{1j} + b_2X_{2j} - \alpha p_j = b_1X_{1j} + b_2(X_{2j} + 1) - \alpha (p_j + WTP) $$
+$$   - \alpha p_j = b_2 - \alpha p_j  - \alpha WTP $$
+$$   \alpha WTP = b_2  $$
+$$   WTP = \frac{b_2}{\alpha}  $$
+Here $$ \alpha = b_{price} $$
+```{r}
+# Willingness to pay
+b_price_hat <- model$estimate[names(model$estimate) == "b_price"]
+model$estimate / b_price_hat
+
+deltaMethod_settings = list(
+  expression = c(
+    WTP_sole = "b_2/b_price"))
+
+apollo_deltaMethod(model, deltaMethod_settings)
+
+```
+According to the rule of thumb, when |t| > 2, then it is significant, which is the case here. The WTP for one-unit improvement in the sole quality is 0.5458. However, it is hard to interpret what does this one- unit quality improvement actually mean.
+
+c) For option 3 and option 5, introduce "sustainable" variable
+```{r}
+### Clear memory
+rm(list = ls())
+
+library(tidyverse)
+### Load Apollo library
+library(apollo)
+
+### Initialise code
+apollo_initialise()
+
+### Set core controls
+apollo_control = list(
+  modelName       = "MNL_Exam_question3c",
+  modelDescr      = "Simple MNL model",
+  indivID         = "id", #name of id column in our data
+  outputDirectory = "output"
+)
+
+# ################################################################# #
+#### LOAD DATA AND APPLY ANY TRANSFORMATIONS                     ####
+# ################################################################# #
+
+# Make sure that working directory is set to script file location
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Locate auto.RData in the same folder as this script file
+load("shoedata2022.rdata")
+database = shoedata
+database$sustainable <- ifelse(database$choice == 3 | database$choice == 5, 1,0)
+```
+```{r}
+# ################################################################# #
+#### DEFINE MODEL PARAMETERS                                     ####
+# ################################################################# #
+
+### Vector of parameters, including any that are kept fixed in estimation
+apollo_beta=c(
+ b_1 = 0,
+ b_2 = 0,
+ b_price =0,
+ b_sus = 0
+)
+
+### Vector with names (in quotes) of parameters to be kept fixed at their starting value in apollo_beta, use apollo_beta_fixed = c() if none
+apollo_fixed = c()
+
+# ################################################################# #
+#### GROUP AND VALIDATE INPUTS                                   ####
+# ################################################################# #
+
+apollo_inputs = apollo_validateInputs()
+
+# ################################################################# #
+#### DEFINE MODEL AND LIKELIHOOD FUNCTION                        ####
+# ################################################################# #
+
+apollo_probabilities <-
+  function(apollo_beta,
+           apollo_inputs,
+           functionality = "estimate") {
+    ### Attach inputs and detach after function exit
+    apollo_attach(apollo_beta, apollo_inputs)
+    on.exit(apollo_detach(apollo_beta, apollo_inputs))
+    
+    ### Create list of probabilities P
+    P = list()
+    
+    ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
+    V = list()
+    V[["oo"]] =  b_1 * X10 + b_2*X20 - b_price*p0 + b_sus*sustainable
+    V[["opt1"]] =  b_1 * X11 + b_2*X21 - b_price*p1 + b_sus*sustainable
+    V[["opt2"]] =  b_1 * X12 + b_2*X22 - b_price*p2 + b_sus*sustainable
+    V[["opt3"]] =  b_1 * X13 + b_2*X23 - b_price*p3 + b_sus*sustainable
+    V[["opt4"]] =  b_1 * X14 + b_2*X24 - b_price*p4 + b_sus*sustainable
+    V[["opt5"]] =  b_1 * X15 + b_2*X25 - b_price*p5 + b_sus*sustainable
+    
+    ### Define settings for MNL model component
+    mnl_settings = list(
+      alternatives  = c("oo"=0,"opt1" = 1, "opt2" = 2, "opt3" = 3,"opt4" = 4, "opt5" = 5), #quotation marks are important
+      avail         = list("oo"= TRUE,"opt1" = TRUE, "opt2" = TRUE, "opt3" = TRUE,"opt4"= TRUE, "opt5" = TRUE),
+      choiceVar     = choice,
+      utilities     = V
+    )
+    
+    ### Compute probabilities using MNL model
+    P[["model"]] = apollo_mnl(mnl_settings, functionality)
+    
+    ### Prepare and return outputs of function
+    P = apollo_prepareProb(P, apollo_inputs, functionality)
+    return(P)
+  }
+
+# ################################################################# #
+#### MODEL ESTIMATION                                            ####
+# ################################################################# #
+
+model = apollo_estimate(apollo_beta, apollo_fixed, apollo_probabilities, apollo_inputs)
+
+# ################################################################# #
+#### MODEL OUTPUTS                                               ####
+# ################################################################# #
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO SCREEN)                               ----
+# ----------------------------------------------------------------- #
+
+apollo_modelOutput(model, modelOutput_settings = list(printClassical = FALSE))
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO FILE, using model name)               ----
+# ----------------------------------------------------------------- #
+
+apollo_saveOutput(model, saveOutput_settings = list(printClassical = FALSE))
+```
+Sustainability seems to have no effect, as it is not significantly different from 0.
+
+d) Nested logit
+```{r}
+rm(list = ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+library(tidyverse)
+library(apollo)
+load("shoedata2022.rdata")
+database = shoedata
+### Initialise code
+apollo_initialise()
+
+### Set core controls
+apollo_control = list(
+  modelName       = "MNL_Nested_Exam_3d",
+  modelDescr      = "Simple MNL model with Nests",
+  indivID         = "id",
+  outputDirectory = "output"
+)
+
+# ################################################################# #
+#### DEFINE MODEL PARAMETERS                                     ####
+# ################################################################# #
+
+### Vector of parameters, including any that are kept fixed in estimation
+apollo_beta = c(
+ b_1 = 0,
+ b_2 = 0,
+ b_price =0,
+ lambda_nest1 = 1
+)
+
+### Vector with names (in quotes) of parameters to be kept fixed at their starting value in apollo_beta, use apollo_beta_fixed = c() if none
+apollo_fixed = c() #doesn't matter what constant to fix. Fixing gc to match the lecture slides
+
+# ################################################################# #
+#### GROUP AND VALIDATE INPUTS                                   ####
+# ################################################################# #
+
+apollo_inputs = apollo_validateInputs()
+
+# ################################################################# #
+#### DEFINE MODEL AND LIKELIHOOD FUNCTION                        ####
+# ################################################################# #
+
+apollo_probabilities = function(apollo_beta,
+                                apollo_inputs,
+                                functionality = "estimate") {
+  ### Attach inputs and detach after function exit
+  apollo_attach(apollo_beta, apollo_inputs)
+  on.exit(apollo_detach(apollo_beta, apollo_inputs))
+  
+  ### Create list of probabilities P
+  P = list()
+  
+  ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
+  V = list()
+  
+    V[["oo"]] =  b_1 * X10 + b_2*X20 - b_price*p0
+    V[["opt1"]] =  b_1 * X11 + b_2*X21 - b_price*p1
+    V[["opt2"]] =  b_1 * X12 + b_2*X22 - b_price*p2
+    V[["opt3"]] =  b_1 * X13 + b_2*X23 - b_price*p3
+    V[["opt4"]] =  b_1 * X14 + b_2*X24 - b_price*p4
+    V[["opt5"]] =  b_1 * X15 + b_2*X25 - b_price*p5  
+
+  ### Specify nests for NL model
+  nlNests = list(root = 1,
+                 nest1 = lambda_nest1
+                 )
+  
+  ### Specify tree structure for NL model
+  nlStructure = list()
+  nlStructure[["root"]] = c("oo", "nest1")
+  nlStructure[["nest1"]] = c("opt1","opt2","opt3","opt4", "opt5")
+  
+  ### Define settings for NL model
+  nl_settings <- list(
+    alternatives = c(
+      oo =   0,
+      opt1 = 1,
+      opt2 = 2,
+      opt3 = 3,
+      opt4 = 4,
+      opt5 = 5
+    ),
+    avail = list(
+      oo =   1,
+      opt1 = 1,
+      opt2 = 1,
+      opt3 = 1,
+      opt4 = 1,
+      opt5 = 1
+    ),
+    choiceVar = choice,
+    utilities = V,
+    nlNests      = nlNests,
+    nlStructure  = nlStructure
+  )
+  
+  ### Compute probabilities using NL model
+  P[["model"]] = apollo_nl(nl_settings, functionality)
+  
+  ### Prepare and return outputs of function
+  P = apollo_prepareProb(P, apollo_inputs, functionality)
+  return(P)
+}
+
+# ################################################################# #
+#### MODEL ESTIMATION                                            ####
+# ################################################################# #
+
+model = apollo_estimate(apollo_beta,
+                        apollo_fixed,
+                        apollo_probabilities,
+                        apollo_inputs)
+
+# ################################################################# #
+#### MODEL OUTPUTS                                               ####
+# ################################################################# #
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO SCREEN)                               ----
+# ----------------------------------------------------------------- #
+
+apollo_modelOutput(model, modelOutput_settings = list(printT1=1))
+# modelOutput_settings = list(printT1=1) adds t-values for the test whether the coefficient is significantly different from 1 - that's relevant for the lambdas! A lambda equal to 1 would mean that there actually is no nest.
+
+apollo_lrTest(model, "MNL_Exam_question3")
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO FILE, using model name)               ----
+# ----------------------------------------------------------------- #
+
+apollo_saveOutput(model)
+```
+e) Modified nests
+```{r}
+rm(list = ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+library(tidyverse)
+library(apollo)
+load("shoedata2022.rdata")
+database = shoedata
+### Initialise code
+apollo_initialise()
+
+### Set core controls
+apollo_control = list(
+  modelName       = "MNL_Nested_Exam_3e",
+  modelDescr      = "Simple MNL model with Nests",
+  indivID         = "id",
+  outputDirectory = "output"
+)
+
+# ################################################################# #
+#### DEFINE MODEL PARAMETERS                                     ####
+# ################################################################# #
+
+### Vector of parameters, including any that are kept fixed in estimation
+apollo_beta = c(
+ b_1 = 0,
+ b_2 = 0,
+ b_price =0,
+ lambda_nest1 = 1,
+ lambda_nest2 = 1
+)
+
+### Vector with names (in quotes) of parameters to be kept fixed at their starting value in apollo_beta, use apollo_beta_fixed = c() if none
+apollo_fixed = c() #doesn't matter what constant to fix. Fixing gc to match the lecture slides
+
+# ################################################################# #
+#### GROUP AND VALIDATE INPUTS                                   ####
+# ################################################################# #
+
+apollo_inputs = apollo_validateInputs()
+
+# ################################################################# #
+#### DEFINE MODEL AND LIKELIHOOD FUNCTION                        ####
+# ################################################################# #
+
+apollo_probabilities = function(apollo_beta,
+                                apollo_inputs,
+                                functionality = "estimate") {
+  ### Attach inputs and detach after function exit
+  apollo_attach(apollo_beta, apollo_inputs)
+  on.exit(apollo_detach(apollo_beta, apollo_inputs))
+  
+  ### Create list of probabilities P
+  P = list()
+  
+  ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
+  V = list()
+  
+    V[["oo"]] =  b_1 * X10 + b_2*X20 - b_price*p0
+    V[["opt1"]] =  b_1 * X11 + b_2*X21 - b_price*p1
+    V[["opt2"]] =  b_1 * X12 + b_2*X22 - b_price*p2
+    V[["opt3"]] =  b_1 * X13 + b_2*X23 - b_price*p3
+    V[["opt4"]] =  b_1 * X14 + b_2*X24 - b_price*p4
+    V[["opt5"]] =  b_1 * X15 + b_2*X25 - b_price*p5  
+
+  ### Specify nests for NL model
+  nlNests = list(root = 1,
+                 nest1 = lambda_nest1,
+                 nest2 = lambda_nest2
+                 )
+  
+  ### Specify tree structure for NL model
+  nlStructure = list()
+  nlStructure[["root"]] = c("oo", "nest1", "nest2")
+  nlStructure[["nest1"]] = c("opt1","opt2","opt3")
+  nlStructure[["nest2"]] = c("opt4", "opt5")
+  ### Define settings for NL model
+  nl_settings <- list(
+    alternatives = c(
+      oo =   0,
+      opt1 = 1,
+      opt2 = 2,
+      opt3 = 3,
+      opt4 = 4,
+      opt5 = 5
+    ),
+    avail = list(
+      oo =   1,
+      opt1 = 1,
+      opt2 = 1,
+      opt3 = 1,
+      opt4 = 1,
+      opt5 = 1
+    ),
+    choiceVar = choice,
+    utilities = V,
+    nlNests      = nlNests,
+    nlStructure  = nlStructure
+  )
+  
+  ### Compute probabilities using NL model
+  P[["model"]] = apollo_nl(nl_settings, functionality)
+  
+  ### Prepare and return outputs of function
+  P = apollo_prepareProb(P, apollo_inputs, functionality)
+  return(P)
+}
+
+# ################################################################# #
+#### MODEL ESTIMATION                                            ####
+# ################################################################# #
+
+model = apollo_estimate(apollo_beta,
+                        apollo_fixed,
+                        apollo_probabilities,
+                        apollo_inputs)
+
+# ################################################################# #
+#### MODEL OUTPUTS                                               ####
+# ################################################################# #
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO SCREEN)                               ----
+# ----------------------------------------------------------------- #
+
+apollo_modelOutput(model, modelOutput_settings = list(printT1=1))
+# modelOutput_settings = list(printT1=1) adds t-values for the test whether the coefficient is significantly different from 1 - that's relevant for the lambdas! A lambda equal to 1 would mean that there actually is no nest.
+
+apollo_lrTest(model, "MNL_Exam_question3")
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO FILE, using model name)               ----
+# ----------------------------------------------------------------- #
+
+apollo_saveOutput(model)
+```
+f) To test for different levels of correlations between the tastes in each nest, we need to estimate a mixed logit model, so the parameter $$ 0 \le \lambda \le 1$$ , which  measures the substitutability of products within a group, must be introduced.
+
+
